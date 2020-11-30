@@ -1,0 +1,469 @@
+version: '3'
+
+volumes:
+  da:
+
+services:
+
+  settings-tp:
+    image: hyperledger/sawtooth-settings-tp:1.2.4
+    container_name: sawtooth-settings-tp
+    depends_on:
+      - validator
+    command: settings-tp -vv --connect tcp://validator:4004
+
+  validator:
+    image: hyperledger/sawtooth-validator:1.2.4
+    container_name: sawtooth-validator
+    expose:
+      - 4004
+    ports:
+      - '4040:4004'
+    command: |
+      bash -c "
+        if [ ! -f /etc/sawtooth/keys/validator.priv ]; then
+          sawadm keygen &&
+          sawtooth keygen my_key &&
+          sawset genesis -k /root/.sawtooth/keys/my_key.priv &&
+          sawset proposal create \
+            -k /root/.sawtooth/keys/my_key.priv \
+            sawtooth.consensus.algorithm.name=Devmode \
+            sawtooth.consensus.algorithm.version=0.1 \
+            -o config.batch &&
+          sawadm genesis config-genesis.batch config.batch
+        fi;
+        sawtooth-validator -vv \
+          --endpoint tcp://validator:8800 \
+          --bind component:tcp://eth0:4004 \
+          --bind network:tcp://eth0:8800 \
+          --bind consensus:tcp://eth0:5050
+      "
+
+  devmode-engine:
+    image: hyperledger/sawtooth-devmode-engine-rust:1.2
+    container_name: sawtooth-devmode-engine-rust-default
+    depends_on:
+      - validator
+    entrypoint: devmode-engine-rust -v -C tcp://validator:5050
+
+  sawtooth-rest-api:
+    image: hyperledger/sawtooth-rest-api:1.2.4
+    container_name: sawtooth-rest-api
+    expose:
+      - 8008
+    ports:
+      - '8043:8008'
+    depends_on:
+      - validator
+    entrypoint: |
+      sawtooth-rest-api -vv
+        --connect tcp://validator:4004
+        --bind sawtooth-rest-api:8008
+
+  da-client-1:
+    build:
+      context: .
+      dockerfile: cli/Dockerfile
+      args:
+        - http_proxy
+        - https_proxy
+        - no_proxy
+    image: da-cli
+    container_name: da-client-1
+    volumes:
+      - ./:/project/da
+      - da:/da
+    command: |
+      bash -c "
+        if [ ! -f /root/container_setup.txt ]; then
+          echo '--- First run setup started... ---\n' &&
+          sleep 10 &&
+          echo '--- Building da-client-1 by docker-compose ---\n' &&
+          init-da-cli.sh &&
+          echo Done > /root/container_setup.txt &&
+          echo '--- First run setup completed... ---\n'
+        else
+          echo '--- First run setup skipped... ---\n'
+        fi &&
+        tail -f /dev/null
+      "
+
+  da-client-2:
+    build:
+      context: .
+      dockerfile: cli/Dockerfile
+      args:
+        - http_proxy
+        - https_proxy
+        - no_proxy
+    image: da-cli
+    container_name: da-client-2
+    volumes:
+      - ./:/project/da
+    command: |
+      bash -c "
+        if [ ! -f /root/container_setup.txt ]; then
+          echo '--- First run setup started... ---\n' &&
+          sleep 10 &&
+          echo '--- Building da-client-2 by docker-compose ---\n' &&
+          init-da-cli.sh &&
+          echo Done > /root/container_setup.txt &&
+          echo '--- First run setup completed... ---\n'
+        else
+          echo '--- First run setup skipped... ---\n'
+        fi &&
+        tail -f /dev/null
+      "
+
+  da-manager:
+    build:
+      context: .
+      dockerfile: cli/Dockerfile
+      args:
+        - http_proxy
+        - https_proxy
+        - no_proxy
+    image: da-cli
+    container_name: da-manager
+    volumes:
+      - ./:/project/da
+    command: |
+      bash -c "
+        if [ ! -f /root/container_setup.txt ]; then
+          echo '--- First run setup started... ---\n' &&
+          sleep 10 &&
+          echo '--- Building da-manager by docker-compose ---\n' &&
+          init-da-cli.sh &&
+          echo Done > /root/container_setup.txt &&
+          echo '--- First run setup completed... ---\n'
+        else
+          echo '--- First run setup skipped... ---\n'
+        fi &&
+        tail -f /dev/null
+      "
+
+  token-processor:
+    build:
+      context: .
+      dockerfile: token_processor/Dockerfile
+      args:
+        - http_proxy
+        - https_proxy
+        - no_proxy
+    image: token-tp
+    container_name: token-processor
+    volumes:
+      - .:/project/da
+    depends_on:
+      - validator
+    command: |
+      bash -c "
+        if [ ! -f /root/container_setup.txt ]; then
+          echo '--- First run setup started... ---\n' &&
+          sleep 10 &&
+          echo '--- Building token-tp by docker-compose ---\n' &&
+          init-token-tp.sh &&
+          echo Done > /root/container_setup.txt &&
+          echo '--- First run setup completed... ---\n'
+        else
+          echo '--- First run setup skipped... ---\n'
+        fi &&
+        token-tp -vv -C tcp://validator:4004 &&
+        tail -f /dev/null
+               "
+
+  rest-api-1:
+    build:
+      context: .
+      dockerfile: rest_api/Dockerfile
+      args:
+        - http_proxy
+        - https_proxy
+        - no_proxy
+    image: rest-api
+    container_name: rest-api-1
+    volumes:
+      - .:/project/da
+      - da:/da
+    ports:
+      - '8140:8000'
+    depends_on:
+      - validator
+    command: |
+      bash -c "
+        if [ ! -f /root/container_setup.txt ]; then
+          echo '--- First run setup started... ---\n' &&
+          sleep 10 &&
+          echo '--- Building rest-api-1 by docker-compose ---' &&
+          init-rest-api.sh manager &&
+          echo '--- Creating a folder in the shared storage... ---' &&
+          mkdir -p /da/rest-api-1 || true &&
+          echo '--- Copying keys to the folder... ---' &&
+          cp -a ~/.sawtooth/keys/ /da/rest-api-1/ &&
+          echo Done > /root/container_setup.txt &&
+          echo '--- First run setup completed... ---\n'
+        else
+          echo '--- First run setup skipped... ---\n'
+        fi &&
+        rest-api --host rest-api-1 --validator tcp://validator:4004 &&
+        tail -f /dev/null
+               "
+
+  rest-api-2:
+    build:
+      context: .
+      dockerfile: rest_api/Dockerfile
+      args:
+        - http_proxy
+        - https_proxy
+        - no_proxy
+    image: rest-api
+    container_name: rest-api-2
+    volumes:
+      - .:/project/da
+      - da:/da
+    ports:
+      - '8240:8000'
+    depends_on:
+      - validator
+      - rest-api-1
+    command: |
+      bash -c "
+        if [ ! -f /root/container_setup.txt ]; then
+          echo '--- First run setup started... ---\n' &&
+          sleep 10 &&
+          echo '--- Building rest-api-2 by docker-compose---' &&
+          init-rest-api.sh issuer &&
+          echo '--- Creating a folder in the shared storage... ---' &&
+          mkdir -p /da/rest-api-2 || true &&
+          echo '--- Copying keys to the folder... ---' &&
+          cp -a ~/.sawtooth/keys /da/rest-api-2/ &&
+          echo Done > /root/container_setup.txt &&
+          echo '--- First run setup completed... ---\n'
+        else
+          echo '--- First run setup skipped... ---\n'
+        fi &&
+        rest-api --host rest-api-2 --validator tcp://validator:4004 &&
+        tail -f /dev/null
+               "
+
+  rest-api-3:
+    build:
+      context: .
+      dockerfile: rest_api/Dockerfile
+      args:
+        - http_proxy
+        - https_proxy
+        - no_proxy
+    image: rest-api
+    container_name: rest-api-3
+    volumes:
+      - .:/project/da
+      - da:/da
+    ports:
+      - '8340:8000'
+    depends_on:
+      - validator
+      - rest-api-2
+    command: |
+      bash -c "
+        if [ ! -f /root/container_setup.txt ]; then
+          echo '--- First run setup started... ---\n' &&
+          sleep 10 &&
+          echo '--- Building rest-api-3 by docker-compose---' &&
+          init-rest-api.sh accountA &&
+          echo '--- Creating a folder in the shared storage... ---' &&
+          mkdir -p /da/rest-api-3 || true &&
+          echo '--- Copying keys to the folder... ---' &&
+          cp -a ~/.sawtooth/keys /da/rest-api-3/ &&
+          echo Done > /root/container_setup.txt &&
+          echo '--- First run setup completed... ---\n'
+        else
+          echo '--- First run setup skipped... ---\n'
+        fi &&
+        rest-api --host rest-api-3 --validator tcp://validator:4004 &&
+        tail -f /dev/null
+               "
+
+  rest-api-4:
+    build:
+      context: .
+      dockerfile: rest_api/Dockerfile
+      args:
+        - http_proxy
+        - https_proxy
+        - no_proxy
+    image: rest-api
+    container_name: rest-api-4
+    volumes:
+      - .:/project/da
+      - da:/da
+    ports:
+      - '8440:8000'
+    depends_on:
+      - validator
+      - rest-api-3
+    command: |
+      bash -c "
+        if [ ! -f /root/container_setup.txt ]; then
+          echo '--- First run setup started... ---\n' &&
+          sleep 10 &&
+          echo '--- Building rest-api-4 by docker-compose---' &&
+          init-rest-api.sh accountB &&
+          echo '--- Creating a folder in the shared storage... ---' &&
+          mkdir -p /da/rest-api-4 || true &&
+          echo '--- Copying keys to the folder... ---' &&
+          cp -a ~/.sawtooth/keys /da/rest-api-4/ &&
+          echo Done > /root/container_setup.txt &&
+          echo '--- First run setup completed... ---\n'
+        else
+          echo '--- First run setup skipped... ---\n'
+        fi &&
+        rest-api --host rest-api-4 --validator tcp://validator:4004 &&
+        tail -f /dev/null
+               "
+
+  container-crontab:
+    image: rancher/container-crontab:v0.5.0
+    container_name: container-crontab
+    labels:
+      io.rancher.scheduler.global: "true"
+      io.rancher.scheduler.affinity:host_label: hostname=stack1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/rancher:/var/lib/rancher
+
+  da-job-worker:
+    build:
+      context: .
+      dockerfile: cli/Dockerfile
+      args:
+        - http_proxy
+        - https_proxy
+        - no_proxy
+    image: da-cli
+    labels:
+      io.rancher.container.start_once: "true"
+      io.rancher.scheduler.affinity:host_label: "hostname=stack1"
+      cron.schedule: "*/10 * * * * *"
+    container_name: da-job-worker
+    volumes:
+      - ./:/project/da
+      - da:/da
+    depends_on:
+      - validator
+      - rest-api-4
+    command: |
+      bash -c "
+        if [ ! -f /root/container_setup.txt ]; then
+          echo '--- First run setup started... ---\n' &&
+          sleep 10 &&
+          echo '--- Building CLI client by docker-compose ---' &&
+          init-da-cli.sh &&
+          echo Done > /root/container_setup.txt &&
+          echo '--- First run setup completed... ---\n'
+        else
+          echo '--- First run setup skipped... ---\n'
+        fi &&
+        echo '--- Starting token rewind... ---' &&
+        if [[ -e /da/rest-api-2/keys/clientWEB.pub ]]; then
+          echo '--- All data to proceed with rewind exist: ---'
+          echo \\Sender\'s public key: $$(cat /da/rest-api-2/keys/clientWEB.pub)\\
+
+          echo cli \\heartbeat --username clientCLI --issuer_public_key $$(cat /da/rest-api-2/keys/clientWEB.pub) --identifier 'BondA' --url http://sawtooth-rest-api:8008\\
+
+          cli \\heartbeat --username clientCLI --issuer_public_key $$(cat /da/rest-api-2/keys/clientWEB.pub) --identifier 'BondA' --url http://sawtooth-rest-api:8008\\
+
+        else
+          echo '--- Some data to proceed with transfer is missing ---'
+        fi &&
+        date
+      "
+
+  da-data-init:
+    build:
+      context: .
+      dockerfile: cli/Dockerfile
+      args:
+        - http_proxy
+        - https_proxy
+        - no_proxy
+    image: da-cli
+    container_name: da-data-init
+    volumes:
+      - ./:/project/da
+      - da:/da
+    depends_on:
+      - validator
+    command: |
+      bash -c "
+        if [ ! -f /root/container_setup.txt ]; then
+          echo '--- First run setup started... ---\n' &&
+          sleep 10 &&
+          echo '--- Building CLI client by docker-compose ---' &&
+          init-da-cli.sh &&
+          echo '--- Waiting for Manager keys... ---' &&
+          while [ ! -f /da/rest-api-1/keys/clientWEB.priv ]; do sleep 1; done;
+          echo '--- Waiting for Issuer keys... ---' &&
+          while [ ! -f /da/rest-api-2/keys/clientWEB.priv ]; do sleep 1; done;
+          echo '--- Waiting for Account A keys... ---' &&
+          while [ ! -f /da/rest-api-3/keys/clientWEB.priv ]; do sleep 1; done;
+          echo '--- Waiting for Account B keys... ---' &&
+          while [ ! -f /da/rest-api-4/keys/clientWEB.priv ]; do sleep 1; done;
+
+          echo '--- Creating Manager account... ---' &&
+          cli set_manager --username clientWEB --name CoinManager --key-dir /da/rest-api-1/keys --url http://sawtooth-rest-api:8008 &&
+
+          echo '--- Issue a token... ---' &&
+          cli issue_token --username clientWEB --identifier 'BondA' --total_supply 100.0 --key-dir /da/rest-api-1/keys --url http://sawtooth-rest-api:8008 &&
+
+          echo '--- Creating Issuer account... ---' &&
+          cli set_issuer --username clientWEB --name CoinIssuer --key-dir /da/rest-api-2/keys --url http://sawtooth-rest-api:8008 &&
+
+          echo '--- Creating Account A account... ---' &&
+          cli set_account --username clientWEB --name CoinAccountA --key-dir /da/rest-api-3/keys --url http://sawtooth-rest-api:8008 &&
+
+          echo '--- Creating Account B account... ---' &&
+          cli set_account --username clientWEB --name CoinAccountB --key-dir /da/rest-api-4/keys --url http://sawtooth-rest-api:8008 &&
+
+          echo '--- Transferring coins from the manager to Account A ... ---' &&
+          cli transfer --username clientWEB --sender_private_key $$(cat /da/rest-api-1/keys/clientWEB.priv) --identifier 'BondA' --total_supply 25.0 --receiver_pkey $$(cat /da/rest-api-3/keys/clientWEB.pub) --key-dir /da/rest-api-1/keys --url http://sawtooth-rest-api:8008 &&
+
+          echo '--- Transferring coins from the manager to Account B ... ---' &&
+          cli transfer --username clientWEB --sender_private_key $$(cat /da/rest-api-1/keys/clientWEB.priv) --identifier 'BondA' --total_supply 25.0 --receiver_pkey $$(cat /da/rest-api-4/keys/clientWEB.pub) --key-dir /da/rest-api-1/keys --url http://sawtooth-rest-api:8008 &&
+
+          echo Done > /root/container_setup.txt &&
+          echo '--- First run setup completed... ---\n'
+        else
+          echo '--- First run setup skipped... ---\n'
+        fi &&
+        date
+      "
+
+  rest-api-proxy:
+    image: nginx
+    container_name: sawtooth-explorer-rest-api-proxy
+    volumes:
+      - ./explorer/docker/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - sawtooth-rest-api
+    ports:
+      - '8090:8090'
+    command: [nginx, '-g', 'daemon off;']
+
+  ng-server:
+    build:
+      context: ./explorer
+      args:
+        - http_proxy
+        - https_proxy
+        - no_proxy
+    depends_on:
+      - rest-api-proxy
+    container_name: sawtooth-explorer
+    ports:
+      - "4201:4201"
+
+networks:
+  da_default:
+    driver: bridge

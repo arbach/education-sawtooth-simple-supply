@@ -1,0 +1,5 @@
+HOST = 'localhost'
+PORT = 8000
+TIMEOUT = 500
+DEBUG = True
+BATCHER_PRIVATE_KEY_FILE_NAME = 'clientWEB'

@@ -1,0 +1,2 @@
+class DaException(Exception):
+    pass

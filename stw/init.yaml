@@ -1,0 +1,60 @@
+  da-data-init:
+    build:
+      context: .
+      dockerfile: cli/Dockerfile
+      args:
+        - http_proxy
+        - https_proxy
+        - no_proxy
+    image: da-cli
+    container_name: da-data-init
+    volumes:
+      - ./:/project/da
+      - da:/da
+    depends_on:
+      - validator
+    command: |
+      bash -c "
+        if [ ! -f /root/container_setup.txt ]; then
+          echo '--- First run setup started... ---\n' &&
+          sleep 10 &&
+          echo '--- Building CLI client by docker-compose ---' &&
+          init-da-cli.sh &&
+          echo '--- Waiting for Manager keys... ---' &&
+          while [ ! -f /da/rest-api-1/keys/clientWEB.priv ]; do sleep 1; done;
+          echo '--- Waiting for Issuer keys... ---' &&
+          while [ ! -f /da/rest-api-2/keys/clientWEB.priv ]; do sleep 1; done;
+          echo '--- Waiting for Account A keys... ---' &&
+          while [ ! -f /da/rest-api-3/keys/clientWEB.priv ]; do sleep 1; done;
+          echo '--- Waiting for Account B keys... ---' &&
+          while [ ! -f /da/rest-api-4/keys/clientWEB.priv ]; do sleep 1; done;
+
+          echo '--- Creating Manager account... ---' &&
+          cli set_manager --username clientWEB --name CoinManager --key-dir /da/rest-api-1/keys --url http://sawtooth-rest-api:8008 &&
+
+          echo '--- Issue a token... ---' &&
+          cli issue_token --username clientWEB --identifier 'BondA' --total_supply 100.0 --key-dir /da/rest-api-1/keys --url http://sawtooth-rest-api:8008 &&
+
+          echo '--- Creating Issuer account... ---' &&
+          cli set_issuer --username clientWEB --name CoinIssuer --key-dir /da/rest-api-2/keys --url http://sawtooth-rest-api:8008 &&
+
+          echo '--- Creating Account A account... ---' &&
+          cli set_account --username clientWEB --name CoinAccountA --key-dir /da/rest-api-3/keys --url http://sawtooth-rest-api:8008 &&
+
+          echo '--- Creating Account B account... ---' &&
+          cli set_account --username clientWEB --name CoinAccountB --key-dir /da/rest-api-4/keys --url http://sawtooth-rest-api:8008 &&
+
+          echo '--- Transferring coins from the manager to Account A ... ---' &&
+          cli transfer --username clientWEB --sender_private_key $$(cat /da/rest-api-1/keys/clientWEB.priv) --identifier 'BondA' --total_supply 25.0 --receiver_pkey $$(cat /da/rest-api-3/keys/clientWEB.pub) --key-dir /da/rest-api-1/keys --url http://sawtooth-rest-api:8008 &&
+
+          echo '--- Transferring coins from the manager to Account B ... ---' &&
+          cli transfer --username clientWEB --sender_private_key $$(cat /da/rest-api-1/keys/clientWEB.priv) --identifier 'BondA' --total_supply 25.0 --receiver_pkey $$(cat /da/rest-api-4/keys/clientWEB.pub) --key-dir /da/rest-api-1/keys --url http://sawtooth-rest-api:8008 &&
+
+          echo Done > /root/container_setup.txt &&
+          echo '--- First run setup completed... ---\n'
+        else
+          echo '--- First run setup skipped... ---\n'
+        fi &&
+        date
+      "
+

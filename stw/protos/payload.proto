@@ -1,0 +1,135 @@
+syntax = "proto3";
+
+message TransactionPayload {
+
+    enum PayloadType {
+        TYPE_UNSET = 0;
+        SET_MANAGER = 1;
+        SET_ACCOUNT = 2;
+        ISSUE_TOKEN = 3;
+        ADD_IMMUTABLE = 4;
+        TRANSFER = 5;
+        HEARTBEAT = 6;
+        SET_ISSUER = 7;
+        SET_TOKEN_STATUS = 8;
+        SET_ENDORSEMENT = 9;
+        SET_BALANCE_ATTRIBUTES = 10;
+    }
+
+    PayloadType payload_type = 1;
+
+    Account set_manager = 2;
+    Account set_account = 3;
+    Token issue_token = 4;
+    Transfer transfer = 5;
+    Token add_immutables = 6;
+    Heartbeat heartbeat = 7;
+    Account set_issuer = 8;
+    Token set_token_status = 9;
+    Account set_endorsement = 10;
+    BalanceAttributes set_balance_attributes = 11;
+}
+
+message Account {
+    string public_key = 1;
+    string name = 2;
+
+    message Attribute {
+        string key = 1;
+        string value = 2;
+    }
+
+    repeated Attribute endorsement = 3;
+}
+
+message Token {
+
+    enum StatusType {
+        ACTIVE = 0;
+        ISSUED = 1;
+        INACTIVE = 2;
+    }
+
+    string name = 1;
+    string issuer_pkey = 2;
+    double total_supply = 3;
+
+    message Attribute {
+        message Entry{
+            string key = 1;
+            string value = 2;
+        }
+        string key = 1;
+        repeated Entry value = 2;
+    }
+
+    repeated Attribute attributes = 4;
+    repeated Attribute immutables = 5;
+
+    StatusType status = 6;
+}
+
+message Transfer {
+    string sender_pkey = 1;
+    string sender_name = 2;
+    string receiver_pkey = 3;
+    string receiver_name = 4;
+    Token asset = 5;
+    string date = 6;
+}
+
+message Heartbeat {
+    string sender_pkey = 1;
+    repeated string receivers_pkey = 2;
+    Token asset = 3;
+    string date = 4;
+}
+
+message BalanceAttributes {
+    string owner_pkey = 1;
+    repeated string identifiers = 2;
+
+    message Attribute {
+        string key = 1;
+        string value = 2;
+    }
+
+    repeated Attribute attributes = 3;
+}
+
+message Balance {
+    string owner_pkey = 1;
+    Token asset = 2;
+
+    message Attribute {
+        string key = 1;
+        string value = 2;
+    }
+
+    repeated Attribute attributes = 3;
+}
+
+message BalanceWithAccountDetails {
+    string owner_pkey = 1;
+    Token asset = 2;
+    string name = 3;
+
+    message Attribute {
+        string key = 1;
+        string value = 2;
+    }
+
+    repeated Attribute attributes = 4;
+}
+
+message BalanceWithTokenDetails {
+    string token_hex = 1;
+    Token asset = 2;
+
+    message Attribute {
+        string key = 1;
+        string value = 2;
+    }
+
+    repeated Attribute attributes = 3;
+}
